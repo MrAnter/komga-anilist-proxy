@@ -1,0 +1,12 @@
+services:
+  komga-anilist-proxy:
+    image: nginx:alpine
+    container_name: komga-anilist-proxy
+    environment:
+      - KOMGA_UPSTREAM=${KOMGA_UPSTREAM}
+    ports:
+      - "${PROXY_PORT:-8090}:80"
+    volumes:
+      - ./default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./web:/usr/share/nginx/inject:ro
+    restart: unless-stopped
