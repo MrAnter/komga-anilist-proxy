@@ -2,18 +2,27 @@
 
 *🇮🇹 [Italiano](#italiano) · 🇬🇧 [English](#english)*
 
-A tiny reverse proxy that injects a script into [Komga](https://komga.org)'s web UI to show
-**related series** (sequels, prequels, side stories…) and **similar titles** from
-[AniList](https://anilist.co), right on each series page — without forking Komga and without
-touching your existing (localized) metadata.
-
-It reuses Komga's built-in **Links** field: any series whose links contain an AniList URL gets a
-*Related series* row above its volumes and a *Similar* row at the bottom. Series you already own are
-shown with their **local Komga title, cover and link** (green); everything else links out to AniList (blue).
-
 ---
 
 ## Italiano
+
+Un piccolo reverse proxy che inietta uno script nella UI web di [Komga](https://komga.org) per mostrare
+le **serie collegate** (sequel, prequel, side story…) e i **titoli simili** da
+[AniList](https://anilist.co), direttamente in ogni pagina serie — senza forkare Komga e senza toccare
+i tuoi metadati (italiani) esistenti.
+
+Riusa il campo **Links** di Komga: ogni serie i cui link contengono un URL AniList ottiene una riga
+*Serie collegate* sopra i volumi e una riga *Simili* in fondo. Le serie che già possiedi sono mostrate
+con **titolo, copertina e link locali** di Komga (verde); il resto rimanda ad AniList (blu).
+
+<details>
+<summary>Screenshot</summary>
+
+![Serie collegate e simili — JoJo's Steel Ball Run](screenshots/fullpage_sbr_ita.png)
+
+![Serie collegate e simili — Pluto](screenshots/fullpage_pluto_ita.png)
+
+</details>
 
 ### Come funziona
 - Un container `nginx` sta davanti a Komga e inietta `web/komga-anilist.js` nell'HTML (`sub_filter`).
@@ -51,6 +60,24 @@ browser e lancia `kalRefresh()`.
 ---
 
 ## English
+
+A tiny reverse proxy that injects a script into [Komga](https://komga.org)'s web UI to show
+**related series** (sequels, prequels, side stories…) and **similar titles** from
+[AniList](https://anilist.co), right on each series page — without forking Komga and without
+touching your existing (localized) metadata.
+
+It reuses Komga's built-in **Links** field: any series whose links contain an AniList URL gets a
+*Related series* row above its volumes and a *Similar* row at the bottom. Series you already own are
+shown with their **local Komga title, cover and link** (green); everything else links out to AniList (blue).
+
+<details>
+<summary>Screenshots</summary>
+
+![Related & similar series — JoJo's Steel Ball Run](screenshots/fullpage_sbr_eng.png)
+
+![Related & similar series — Pluto](screenshots/fullpage_pluto_eng.png)
+
+</details>
 
 ### How it works
 - An `nginx` container sits in front of Komga and injects `web/komga-anilist.js` into the HTML (`sub_filter`).
