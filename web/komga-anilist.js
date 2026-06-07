@@ -33,6 +33,7 @@
         SPIN_OFF: 'Spin-off', ALTERNATIVE: 'Alternativa', ADAPTATION: 'Adattamento',
         CHARACTER: 'Personaggio', SOURCE: 'Originale', SUMMARY: 'Riassunto',
         CONTAINS: 'Contiene', OTHER: 'Altro', COMPILATION: 'Raccolta' },
+      status: { ongoing: 'In corso', ended: 'Completa', hiatus: 'In pausa', abandoned: 'Droppata', unreleased: 'Non ancora uscita' },
     },
     en: {
       related: 'Related series', similar: 'Similar (from AniList)', inLibrary: 'In library', editions: 'editions', otherEditions: 'Other editions',
@@ -40,12 +41,24 @@
         SPIN_OFF: 'Spin-off', ALTERNATIVE: 'Alternative', ADAPTATION: 'Adaptation',
         CHARACTER: 'Character', SOURCE: 'Source', SUMMARY: 'Summary',
         CONTAINS: 'Contains', OTHER: 'Other', COMPILATION: 'Compilation' },
+      status: { ongoing: 'Ongoing', ended: 'Completed', hiatus: 'Hiatus', abandoned: 'Dropped', unreleased: 'Not yet released' },
     },
   };
   const T = () => I18N[lang()] || I18N.en;
   const relLabel = (t) => (T().rel[t] || t.charAt(0) + t.slice(1).toLowerCase().replace(/_/g, ' '));
   const REL_ORDER = ['PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'SPIN_OFF', 'ALTERNATIVE',
                      'SOURCE', 'ADAPTATION', 'CHARACTER', 'COMPILATION', 'CONTAINS', 'SUMMARY', 'OTHER'];
+
+  // Komga (ONGOING/ENDED/HIATUS/ABANDONED) and AniList (RELEASING/FINISHED/HIATUS/CANCELLED/NOT_YET_RELEASED)
+  // status, mapped onto a shared key that drives the corner dot's colour and tooltip.
+  const STATUS_MAP = {
+    ONGOING: 'ongoing', RELEASING: 'ongoing',
+    ENDED: 'ended', FINISHED: 'ended',
+    HIATUS: 'hiatus',
+    ABANDONED: 'abandoned', CANCELLED: 'abandoned',
+    NOT_YET_RELEASED: 'unreleased',
+  };
+  const normStatus = (s) => STATUS_MAP[s] || null;
 
   const seriesIdFromPath = () => (location.pathname.match(/\/series\/([^/?#]+)/) || [])[1] || null;
   const log = (...a) => console.debug(TAG, ...a);
@@ -94,32 +107,41 @@
     return out;
   };
 
-  // { anilistId -> [{ id, title }] } for every owned series, cached in localStorage.
-  async function ownedMap(force) {
+  // One pass over the whole library, cached in localStorage:
+  //   map  = { anilistId -> [{ id, title, unread, status }] }  (only series with an AniList link)
+  //   byId = { komgaSeriesId -> status }                       (every series, for the native-card dots)
+  let LIB = null; // in-memory copy so card decoration stays synchronous after the first load
+  async function libraryData(force) {
     if (!force) {
+      if (LIB) return LIB;
       try {
         const c = JSON.parse(localStorage.getItem(OWNED_KEY) || 'null');
-        if (c && Date.now() - c.ts < OWNED_TTL) return c.map;
+        if (c && Date.now() - c.ts < OWNED_TTL) { LIB = c; return c; }
       } catch (e) {}
     }
     const d = await komga('/api/v1/series?unpaged=true');
-    const map = {};
+    const map = {}, byId = {};
     for (const s of d.content) {
+      // Same count Komga shows in its own corner badge: unread + in-progress.
+      const unread = (s.booksUnreadCount || 0) + (s.booksInProgressCount || 0);
+      const status = s.metadata && s.metadata.status; // ONGOING / ENDED / HIATUS / ABANDONED
+      if (status) byId[s.id] = status;
       for (const id of anilistIdsFromLinks(s.metadata && s.metadata.links)) {
-        (map[id] = map[id] || []).push({ id: s.id, title: s.metadata.title });
+        (map[id] = map[id] || []).push({ id: s.id, title: s.metadata.title, unread, status });
       }
     }
-    try { localStorage.setItem(OWNED_KEY, JSON.stringify({ ts: Date.now(), map })); } catch (e) {}
-    return map;
+    LIB = { ts: Date.now(), map, byId };
+    try { localStorage.setItem(OWNED_KEY, JSON.stringify(LIB)); } catch (e) {}
+    return LIB;
   }
 
   const MEDIA_BODY = `
-    type format
+    type format averageScore
     title { romaji english }
     relations { edges { relationType(version: 2)
-      node { id type format title { romaji english } coverImage { medium } siteUrl } } }
+      node { id type format status title { romaji english } coverImage { medium } siteUrl } } }
     recommendations(sort: RATING_DESC, perPage: 16) { nodes {
-      mediaRecommendation { id type format title { romaji english } coverImage { medium } siteUrl } } }`;
+      mediaRecommendation { id type format status title { romaji english } coverImage { medium } siteUrl } } }`;
 
   // Fetch all the series' AniList ids, aliased in chunks to stay under the query complexity limit.
   async function fetchMedias(ids) {
@@ -183,7 +205,20 @@
       .kal-card .kal-t{font-size:.78rem;line-height:1.2;margin-top:7px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
       .kal-card .kal-meta{font-size:.68rem;opacity:.55}
       .kal-card .kal-badge{position:absolute;top:6px;left:6px;background:rgba(30,136,229,.78);color:#fff;font-size:.62rem;padding:2px 6px;border-radius:4px;font-weight:600}
-      .kal-card .kal-ext{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.6);color:#fff;font-size:.6rem;padding:2px 5px;border-radius:4px}`;
+      .kal-card .kal-ext{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.6);color:#fff;font-size:.6rem;padding:2px 5px;border-radius:4px}
+      /* Unread badge: same look as Komga's native corner badge (white text on orange, top-right). */
+      .kal-card .kal-unread{position:absolute;top:0;right:0;background:orange;color:#fff;padding:4px 8px;font-size:.875rem;font-weight:500;letter-spacing:.0071em;line-height:1.375rem;border-top-right-radius:6px;border-bottom-left-radius:4px}
+      /* Status dot (top-left): ongoing / ended / hiatus / abandoned / unreleased.
+         No border, flat colour — just a soft drop shadow to lift it off the cover.
+         .kal-dot sits on our own cards; .kal-cdot is injected onto Komga's native cards. */
+      .kal-card .kal-dot,.kal-cdot{position:absolute;top:7px;left:7px;width:11px;height:11px;border-radius:50%;box-shadow:0 0 3px rgba(0,0,0,.6);pointer-events:none;z-index:1}
+      .kal-st-ongoing{background:#42a5f5}
+      .kal-st-ended{background:#66bb6a}
+      .kal-st-hiatus{background:#ffa726}
+      .kal-st-abandoned{background:#ef5350}
+      .kal-st-unreleased{background:#9e9e9e}
+      /* AniList score chip in Komga's attribute row — native v-chip shape, Komga's status palette. */
+      .kal-score-chip{cursor:default}`;
     (document.head || document.documentElement).appendChild(s);
   }
 
@@ -210,8 +245,15 @@
     const pretty = (s) => s ? s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, ' ') : '';
     const meta = (media.format && media.format !== media.type)
       ? pretty(media.type) + ' · ' + pretty(media.format) : pretty(media.type);
+    // Owned series get Komga's own unread/in-progress count badge in the cover's top-right corner.
+    const unread = ownedKomgaId && owned.unread > 0
+      ? `<span class="kal-unread">${owned.unread}</span>` : '';
+    // Status dot (top-left): owned series read it from Komga, AniList-only cards from AniList.
+    const st = normStatus(ownedKomgaId ? owned.status : (media && media.status));
+    const dot = st
+      ? `<span class="kal-dot kal-st-${st}" title="${(T().status[st] || st).replace(/"/g, '&quot;')}"></span>` : '';
     a.innerHTML =
-      `<img loading="lazy" src="${cover}" alt="">` +
+      `<img loading="lazy" src="${cover}" alt="">` + unread + dot +
       `<div class="kal-t">${title.replace(/</g, '&lt;')}</div>` +
       `<div class="kal-meta">${meta}</div>`;
     return a;
@@ -307,6 +349,80 @@
     return el || null;
   }
 
+  // Stamp a status dot on Komga's own series cards (home, browse, collections, search…).
+  // Komga cards are v-cards navigated by click (no <a href>), so we read the series id from the
+  // cover's background-image URL (/api/v1/series/{id}/thumbnail). No extra API calls — just the
+  // cached library map. Idempotent: only touches a card when its dot is missing or stale.
+  function decorateCards() {
+    if (!LIB || !LIB.byId) return;
+    ensureStyle();
+    for (const vi of document.querySelectorAll('.v-image')) {
+      const w = vi.clientWidth;
+      if (w === 0) continue; // not laid out yet — catch it on the next pass
+      // The big cover on a series detail page is also a .v-image — skip anything bigger than a card.
+      if (w > 280) { const d = vi.querySelector(':scope > .kal-cdot'); if (d) d.remove(); continue; }
+      const node = vi.querySelector('[style*="background-image"]');
+      const bg = (node && node.style.backgroundImage) || '';
+      const m = bg.match(/\/series\/([^/?"')]+)\/thumbnail/);
+      let dot = vi.querySelector(':scope > .kal-cdot');
+      if (!m) { if (dot) dot.remove(); continue; }
+      const id = m[1];
+      const st = normStatus(LIB.byId[id]);
+      if (!st) { if (dot) dot.remove(); continue; }
+      if (dot && dot.dataset.kalId === id) continue; // already correct
+      if (!dot) { dot = document.createElement('span'); vi.appendChild(dot); }
+      dot.className = 'kal-cdot kal-st-' + st;
+      dot.dataset.kalId = id;
+      dot.title = T().status[st] || st;
+    }
+  }
+  // AniList average score as a chip on the series page, dropped into Komga's own attribute row
+  // (status / language / reading-direction). Built with Vuetify's chip classes so it matches the
+  // native chips; coloured by score tier (hi/mid/lo). Anchored via the .text-h5 title so it
+  // survives SPA re-renders. Idempotent.
+  const scoreTier = (s) => (s >= 75 ? 'hi' : s >= 60 ? 'mid' : 'lo');
+  function injectScore() {
+    const sid = seriesIdFromPath();
+    const want = (cur && cur.sid === sid && cur.score) ? cur.score : null;
+    let col = document.getElementById('kal-score');
+    if (want == null) { if (col) col.remove(); return; }
+    if (col && col.dataset.sid === sid && col.isConnected) return; // already in place
+    // Find the current series' title heading, then the attribute (chip) row in its container.
+    const t = (cur.title || '').trim();
+    let titleEl = null;
+    for (const el of document.querySelectorAll('.text-h5')) {
+      if (el.textContent.trim() === t) { titleEl = el; break; }
+    }
+    if (!titleEl) return; // header not rendered yet — a later mutation retries
+    const container = titleEl.closest('.container') || titleEl.closest('.v-card');
+    const row = container && container.querySelector('.row.text-body-2');
+    if (!row) return; // chip row not present yet
+    if (col) col.remove();
+    const dark = (document.querySelector('.v-application') || document.body).classList.contains('theme--dark');
+    col = document.createElement('div');
+    col.id = 'kal-score'; col.className = 'col-auto py-1 pe-0'; col.dataset.sid = sid;
+    // Same Vuetify colour helpers Komga uses for its status chips (green/orange/red darken-4),
+    // so the score chip is tinted with the exact same palette.
+    const tierColor = { hi: 'green darken-4', mid: 'orange darken-4', lo: 'red darken-4' }[scoreTier(want)];
+    const chip = document.createElement('span');
+    chip.className = 'v-chip v-chip--label v-size--small ' + (dark ? 'theme--dark' : 'theme--light')
+      + ' kal-score-chip white--text ' + tierColor;
+    chip.title = 'AniList average score';
+    const inner = document.createElement('span');
+    inner.className = 'v-chip__content'; inner.textContent = 'AniList ' + want + '%';
+    chip.appendChild(inner); col.appendChild(chip); row.appendChild(col);
+  }
+
+  let decorateDbnc = null;
+  function scheduleDecorate() {
+    clearTimeout(decorateDbnc);
+    decorateDbnc = setTimeout(() => {
+      injectScore();
+      if (LIB && LIB.byId) decorateCards();
+      else libraryData(false).then(decorateCards).catch((e) => console.error(TAG, e));
+    }, 150);
+  }
+
   let cur = null;
   let fetching = false, rendering = false, dbnc = null;
 
@@ -360,10 +476,14 @@
       if (!ids.length) { cur = null; removeSections(); log('series without AniList link:', sid); return; }
       log('series', sid, '-> AniList', ids, '| lang', lang());
       const selfIds = new Set(ids);
-      const [medias, owned] = await Promise.all([fetchMedias(ids), ownedMap(forceMap)]);
+      const [medias, lib] = await Promise.all([fetchMedias(ids), libraryData(forceMap)]);
+      const owned = lib.map;
       if (seriesIdFromPath() !== sid) return;
       const data = mergeMedias(medias, selfIds);
       const media0 = medias[0] || null;
+      // AniList score for the open series (the only thing Komga can't hold natively).
+      // Bundled series can have several ids: take the best available average score.
+      const score = medias.reduce((m, x) => (x && x.averageScore > m ? x.averageScore : m), 0) || null;
       // Other editions of this same series you own (same AniList id, excluding the open one).
       const seenK = new Set([sid]);
       const otherEd = [];
@@ -371,11 +491,12 @@
         if (!seenK.has(o.id)) { seenK.add(o.id); otherEd.push(o); }
       }
       cur = {
-        sid, data, owned, media0, otherEd,
+        sid, data, owned, media0, otherEd, score, title: series.metadata.title,
         hasRel: data.relations.edges.length > 0 || otherEd.length > 0,
         hasSim: data.recommendations.nodes.length > 0,
       };
       render();
+      injectScore();
       log('render ok');
     } catch (e) {
       console.error(TAG, e);
@@ -385,10 +506,10 @@
   }
 
   // Rebuild the library map (call from the console after adding AniList links).
-  window.kalRefresh = function () { localStorage.removeItem(OWNED_KEY); cur = null; removeSections(); load(true); };
+  window.kalRefresh = function () { LIB = null; localStorage.removeItem(OWNED_KEY); cur = null; removeSections(); load(true); scheduleDecorate(); };
 
   // Komga is a Vue SPA — hook navigation so we re-run on route changes.
-  function tick() { setTimeout(load, 400); }
+  function tick() { setTimeout(load, 400); scheduleDecorate(); }
   for (const m of ['pushState', 'replaceState']) {
     const orig = history[m];
     history[m] = function () { const r = orig.apply(this, arguments); tick(); return r; };
@@ -396,6 +517,7 @@
   window.addEventListener('popstate', tick);
 
   new MutationObserver(() => {
+    scheduleDecorate(); // status dots on native cards, on every page
     const sid = seriesIdFromPath();
     if (!sid) { if (cur) { cur = null; removeSections(); } return; }
     if (!cur || cur.sid !== sid) { load(); return; }
